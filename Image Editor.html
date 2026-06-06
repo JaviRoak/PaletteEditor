@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Image Editor</title>
+  <style>
+    :root {
+      --bg:         oklch(0.10 0.008 248);
+      --surface-0:  oklch(0.13 0.008 248);
+      --surface-1:  oklch(0.17 0.008 248);
+      --surface-2:  oklch(0.21 0.009 248);
+      --surface-3:  oklch(0.27 0.009 248);
+      --border:     oklch(0.24 0.008 248);
+      --text-1:     oklch(0.90 0.005 248);
+      --text-2:     oklch(0.60 0.010 248);
+      --text-3:     oklch(0.40 0.008 248);
+      --accent:     oklch(0.70 0.19 52);
+      --accent-dim: oklch(0.28 0.12 52);
+      --radius-sm:  4px;
+      --radius-md:  6px;
+      --sidebar-w:  260px;
+      --topbar-h:   48px;
+    }
+
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: system-ui, -apple-system, Helvetica Neue, Arial, sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+      background: var(--bg);
+      color: var(--text-1);
+      height: 100vh;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── App Shell ── */
+    .app { display: flex; flex-direction: column; height: 100vh; }
+
+    /* ── Top Bar ── */
+    .topbar {
+      height: var(--topbar-h);
+      min-height: var(--topbar-h);
+      background: var(--surface-1);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 12px;
+    }
+
+    .topbar-brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      color: var(--text-1);
+      margin-right: auto;
+    }
+
+    .topbar-brand svg { color: var(--accent); flex-shrink: 0; }
+
+    .upload-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--accent);
+      color: #fff;
+      padding: 6px 14px;
+      border-radius: var(--radius-md);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      white-space: nowrap;
+      letter-spacing: 0.01em;
+    }
+    .upload-btn:hover { opacity: 0.85; }
+
+    #imageInput { display: none; }
+
+    /* ── Workspace ── */
+    .workspace { flex: 1; display: flex; min-height: 0; }
+
+    /* ── Canvas Area ── */
+    .canvas-area {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+      background-color: var(--bg);
+      background-image:
+        linear-gradient(45deg, var(--surface-0) 25%, transparent 25%),
+        linear-gradient(-45deg, var(--surface-0) 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, var(--surface-0) 75%),
+        linear-gradient(-45deg, transparent 75%, var(--surface-0) 75%);
+      background-size: 20px 20px;
+      background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+    }
+
+    #canvas {
+      display: none;
+      cursor: crosshair;
+      box-shadow: 0 12px 48px rgba(0,0,0,0.7);
+    }
+    #canvas.active { display: block; }
+
+    .placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      color: var(--text-3);
+      pointer-events: none;
+      user-select: none;
+      text-align: center;
+    }
+    .placeholder svg { opacity: 0.35; }
+    .placeholder-title { font-size: 14px; font-weight: 500; color: var(--text-2); }
+    .placeholder-sub { font-size: 12px; color: var(--text-3); }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      width: var(--sidebar-w);
+      min-width: var(--sidebar-w);
+      background: var(--surface-1);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Controls ── */
+    .controls {
+      opacity: 0;
+      height: 0;
+      flex: 0 0 0;
+      overflow: hidden;
+      transition: opacity 0.2s ease;
+    }
+    .controls.active {
+      opacity: 1;
+      height: auto;
+      flex: 1;
+      overflow-y: auto;
+      min-height: 0;
+    }
+    .controls.active::-webkit-scrollbar { width: 3px; }
+    .controls.active::-webkit-scrollbar-track { background: transparent; }
+    .controls.active::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 2px; }
+
+    /* Idle state */
+    .sidebar-idle {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      color: var(--text-3);
+      font-size: 12px;
+      text-align: center;
+      padding: 24px;
+    }
+    .sidebar-idle svg { opacity: 0.3; margin-bottom: 4px; }
+    .controls:not(.active) ~ .sidebar-idle { display: flex; }
+    .controls.active ~ .sidebar-idle { display: none; }
+
+    /* ── Sections ── */
+    .panel-section {
+      padding: 14px 16px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .panel-section:last-child { border-bottom: none; }
+
+    .section-heading {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      color: var(--text-3);
+      margin-bottom: 12px;
+    }
+
+    /* ── Control Groups ── */
+    .control-group { margin-bottom: 11px; }
+    .control-group:last-child { margin-bottom: 0; }
+
+    .ctrl-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 5px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-2);
+    }
+
+    .value-display {
+      font-variant-numeric: tabular-nums;
+      font-size: 11px;
+      color: var(--text-3);
+      min-width: 36px;
+      text-align: right;
+    }
+
+    /* ── Range Inputs ── */
+    input[type="range"] {
+      width: 100%;
+      height: 3px;
+      border-radius: 2px;
+      outline: none;
+      -webkit-appearance: none;
+      appearance: none;
+      cursor: pointer;
+      background: linear-gradient(
+        to right,
+        var(--accent) var(--fill, 0%),
+        var(--surface-3) var(--fill, 0%)
+      );
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: var(--text-1);
+      cursor: pointer;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+      transition: transform 0.1s, background 0.1s;
+    }
+    input[type="range"]:hover::-webkit-slider-thumb {
+      background: #fff;
+      transform: scale(1.1);
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: var(--text-1);
+      cursor: pointer;
+      border: none;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    }
+
+    /* ── Selects ── */
+    select {
+      width: 100%;
+      padding: 6px 28px 6px 9px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-1);
+      font-size: 12px;
+      cursor: pointer;
+      outline: none;
+      -webkit-appearance: none;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+      transition: border-color 0.15s;
+    }
+    select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-dim);
+    }
+
+    /* ── Color Inputs ── */
+    input[type="color"] {
+      width: 100%;
+      height: 30px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      background: var(--surface-2);
+      padding: 2px 3px;
+      transition: border-color 0.15s;
+    }
+    input[type="color"]:focus { border-color: var(--accent); }
+
+    /* ── Toggle Switches ── */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-2);
+    }
+
+    input[type="checkbox"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 30px;
+      height: 17px;
+      background: var(--surface-3);
+      border-radius: 9px;
+      cursor: pointer;
+      position: relative;
+      flex-shrink: 0;
+      transition: background 0.2s;
+    }
+    input[type="checkbox"]::after {
+      content: '';
+      position: absolute;
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: var(--text-3);
+      top: 3px;
+      left: 3px;
+      transition: left 0.2s, background 0.2s;
+    }
+    input[type="checkbox"]:checked { background: var(--accent-dim); }
+    input[type="checkbox"]:checked::after { left: 16px; background: var(--accent); }
+
+    /* ── Tool Buttons ── */
+    .drawing-actions {
+      display: flex;
+      gap: 6px;
+    }
+    .tool-btn {
+      flex: 1;
+      padding: 6px 10px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-2);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      white-space: nowrap;
+    }
+    .tool-btn:hover { background: var(--surface-3); color: var(--text-1); }
+    .tool-btn:active { opacity: 0.75; }
+
+    /* ── Sidebar Footer ── */
+    .sidebar-footer {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn-reset {
+      flex: 1;
+      padding: 8px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      color: var(--text-2);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .btn-reset:hover { background: var(--surface-2); color: var(--text-1); }
+
+    .btn-download {
+      flex: 2;
+      padding: 8px;
+      background: var(--accent);
+      border: none;
+      border-radius: var(--radius-md);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      letter-spacing: 0.01em;
+    }
+    .btn-download:hover:not(:disabled) { opacity: 0.85; }
+    .btn-download:disabled { opacity: 0.25; cursor: not-allowed; }
+
+    /* ── Responsive ── */
+    @media (max-width: 720px) {
+      :root { --sidebar-w: 100%; }
+      .workspace { flex-direction: column; }
+      .sidebar { width: 100%; min-width: 0; border-left: none; border-top: 1px solid var(--border); max-height: 50vh; }
+      body { overflow: auto; }
+      .app { height: auto; min-height: 100vh; }
+      .canvas-area { min-height: 40vh; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ── Top Bar ── -->
+  <header class="topbar">
+    <div class="topbar-brand">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+        <circle cx="12" cy="13" r="3"/>
+      </svg>
+      Image Editor
+    </div>
+    <label for="imageInput" class="upload-btn">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/>
+        <line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      Upload Image
+    </label>
+    <input type="file" id="imageInput" accept="image/*">
+  </header>
+
+  <!-- ── Workspace ── -->
+  <div class="workspace">
+
+    <!-- Canvas Area -->
+    <div class="canvas-area">
+      <canvas id="canvas"></canvas>
+      <div class="placeholder">
+        <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="3.5 2"/>
+          <circle cx="8.5" cy="8.5" r="1.5"/>
+          <polyline points="21 15 16 10 5 21"/>
+        </svg>
+        <p class="placeholder-title">No image loaded</p>
+        <p class="placeholder-sub">Click Upload Image to get started</p>
+      </div>
+    </div>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="controls">
+
+        <!-- Adjustments -->
+        <div class="panel-section">
+          <div class="section-heading">Adjustments</div>
+
+          <div class="control-group">
+            <div class="ctrl-label">
+              <span>Brightness</span>
+              <span class="value-display" id="brightnessValue">100%</span>
+            </div>
+            <input type="range" id="brightness" min="0" max="200" value="100">
+          </div>
+
+          <div class="control-group">
+            <div class="ctrl-label">
+              <span>Contrast</span>
+              <span class="value-display" id="contrastValue">100%</span>
+            </div>
+            <input type="range" id="contrast" min="0" max="200" value="100">
+          </div>
+
+          <div class="control-group">
+            <div class="ctrl-label">
+              <span>Saturation</span>
+              <span class="value-display" id="saturationValue">100%</span>
+            </div>
+            <input type="range" id="saturation" min="0" max="200" value="100">
+          </div>
+
+          <div class="control-group">
+            <div class="ctrl-label">
+              <span>Hue Rotation</span>
+              <span class="value-display" id="hueValue">0°</span>
+            </div>
+            <input type="range" id="hue" min="0" max="360" value="0">
+          </div>
+
+          <div class="control-group">
+            <div class="ctrl-label">
+              <span>Rotation</span>
+              <span class="value-display" id="rotationValue">0°</span>
+            </div>
+            <input type="range" id="rotation" min="0" max="360" value="0">
+          </div>
+
+          <div class="control-group">
+            <div class="ctrl-label">
+              <span>Opacity</span>
+              <span class="value-display" id="opacityValue">100%</span>
+            </div>
+            <input type="range" id="opacity" min="0" max="100" value="100">
+          </div>
+        </div>
+
+        <!-- Drawing Tools -->
+        <div class="panel-section">
+          <div class="section-heading">Drawing</div>
+
+          <div class="control-group">
+            <div class="ctrl-label"><span>Tool</span></div>
+            <select id="drawTool">
+              <option value="none">None</option>
+              <option value="rectangle">Rectangle</option>
+              <option value="circle">Circle</option>
+              <option value="line">Line</option>
+              <option value="freehand">Freehand</option>
+            </select>
+          </div>
+
+          <div class="control-group">
+            <div class="ctrl-label"><span>Color</span></div>
+            <input type="color" id="drawColor" value="#ffffff">
+          </div>
+
+          <div class="control-group">
+            <div class="ctrl-label"><span>Gradient Color</span></div>
+            <input type="color" id="gradientColor" value="#000000">
+          </div>
+
+          <div class="control-group">
+            <div class="toggle-row">
+              <span>Use Gradient</span>
+              <input type="checkbox" id="useGradient">
+            </div>
+          </div>
+
+          <div class="control-group">
+            <div class="ctrl-label">
+              <span>Stroke Width</span>
+              <span class="value-display" id="strokeValue">2</span>
+            </div>
+            <input type="range" id="strokeWidth" min="1" max="50" value="2">
+          </div>
+
+          <div class="control-group">
+            <div class="ctrl-label">
+              <span>Opacity</span>
+              <span class="value-display" id="drawOpacityValue">100%</span>
+            </div>
+            <input type="range" id="drawOpacity" min="0" max="100" value="100">
+          </div>
+
+          <div class="control-group">
+            <div class="toggle-row">
+              <span>Fill Shape</span>
+              <input type="checkbox" id="fillShape" checked>
+            </div>
+          </div>
+
+          <div class="control-group drawing-actions">
+            <button id="undoBtn" class="tool-btn">↶ Undo</button>
+            <button id="clearDrawingBtn" class="tool-btn">Clear</button>
+          </div>
+        </div>
+
+        <!-- Effects -->
+        <div class="panel-section">
+          <div class="section-heading">Effects</div>
+
+          <div class="control-group">
+            <div class="toggle-row">
+              <span>Vignette</span>
+              <input type="checkbox" id="vignette">
+            </div>
+          </div>
+
+          <div class="control-group" id="vignetteGroup" style="display:none;">
+            <div class="ctrl-label">
+              <span>Intensity</span>
+              <span class="value-display" id="vignetteValue">50%</span>
+            </div>
+            <input type="range" id="vignetteIntensity" min="0" max="100" value="50">
+          </div>
+
+          <div class="control-group">
+            <div class="ctrl-label"><span>Border</span></div>
+            <select id="borderType">
+              <option value="none">None</option>
+              <option value="solid">Solid</option>
+              <option value="double">Double</option>
+            </select>
+          </div>
+
+          <div id="borderGroup" style="display:none;">
+            <div class="control-group">
+              <div class="ctrl-label"><span>Border Color</span></div>
+              <input type="color" id="borderColor" value="#000000">
+            </div>
+            <div class="control-group">
+              <div class="ctrl-label">
+                <span>Border Width</span>
+                <span class="value-display" id="borderWidthValue">20px</span>
+              </div>
+              <input type="range" id="borderWidth" min="5" max="50" value="20">
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /.controls -->
+
+      <!-- Idle State -->
+      <div class="sidebar-idle">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+          <circle cx="12" cy="13" r="3"/>
+        </svg>
+        Upload an image to<br>start editing
+      </div>
+
+      <!-- Footer -->
+      <div class="sidebar-footer">
+        <button id="resetBtn" class="btn-reset">Reset</button>
+        <button id="downloadBtn" class="btn-download" disabled>Export PNG</button>
+      </div>
+    </aside>
+
+  </div><!-- /.workspace -->
+</div><!-- /.app -->
+
+<script src="script.js"></script>
+<script>
+  // Slider fill — updates CSS --fill var so track shows filled portion
+  function updateFill(el) {
+    const pct = ((el.value - el.min) / (el.max - el.min) * 100).toFixed(1) + '%';
+    el.style.setProperty('--fill', pct);
+  }
+  document.querySelectorAll('input[type=range]').forEach(r => {
+    updateFill(r);
+    r.addEventListener('input', () => updateFill(r));
+  });
+
+  // Fit canvas to fill the canvas area on load and resize
+  const canvasEl = document.getElementById('canvas');
+  const canvasArea = document.querySelector('.canvas-area');
+
+  function fitCanvas() {
+    if (!canvasEl.width || !canvasEl.height) return;
+    const pad = 40;
+    const aW = canvasArea.clientWidth - pad;
+    const aH = canvasArea.clientHeight - pad;
+    const scale = Math.min(aW / canvasEl.width, aH / canvasEl.height);
+    canvasEl.style.width  = Math.round(canvasEl.width  * scale) + 'px';
+    canvasEl.style.height = Math.round(canvasEl.height * scale) + 'px';
+  }
+
+  // Re-fit whenever a new image is loaded
+  document.getElementById('imageInput').addEventListener('change', () => {
+    setTimeout(fitCanvas, 80);
+  });
+
+  // Re-fit when the window resizes
+  new ResizeObserver(fitCanvas).observe(canvasArea);
+</script>
+</body>
+</html>
